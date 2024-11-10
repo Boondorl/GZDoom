@@ -143,6 +143,7 @@ static FRandom pr_uniquetid("UniqueTID");
 // PUBLIC DATA DEFINITIONS -------------------------------------------------
 
 FRandom pr_spawnmobj ("SpawnActor");
+FRandom pr_spawncsmobj("SpawnClientsideActor");
 FRandom pr_bounce("Bounce");
 FRandom pr_spawnmissile("SpawnMissile");
 
@@ -189,9 +190,9 @@ IMPLEMENT_POINTERS_END
 
 void AActor::EnableNetworking(const bool enable)
 {
-	if (!enable)
+	if (!enable && !(ObjectFlags & OF_Clientside))
 	{
-		ThrowAbortException(X_OTHER, "Cannot disable networking on Actors. Consider a Thinker instead.");
+		ThrowAbortException(X_OTHER, "Cannot disable networking on Actors. Consider a Thinker or clientside Actor instead.");
 		return;
 	}
 
@@ -504,7 +505,7 @@ bool AActor::IsMapActor()
 
 inline int GetTics(AActor* actor, FState * newstate)
 {
-	int tics = newstate->GetTics();
+	int tics = (actor->ObjectFlags & OF_Clientside) ? newstate->GetClientsideTics() : newstate->GetTics();
 	if (actor->isFast() && newstate->GetFast())
 	{
 		return tics - (tics>>1);
@@ -4769,7 +4770,7 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 	// Actors with zero gravity need the NOGRAVITY flag set.
 	if (actor->Gravity == 0) actor->flags |= MF_NOGRAVITY;
 
-	FRandom &rng = Level->BotInfo.m_Thinking ? pr_botspawnmobj : pr_spawnmobj;
+	FRandom &rng = (actor->ObjectFlags & OF_Clientside) ? pr_spawncsmobj : (Level->BotInfo.m_Thinking ? pr_botspawnmobj : pr_spawnmobj);
 
 	if ((!!G_SkillProperty(SKILLP_InstantReaction) || actor->flags5 & MF5_ALWAYSFAST || !!(dmflags & DF_INSTANT_REACTION))
 		&& actor->flags3 & MF3_ISMONSTER)
@@ -4786,7 +4787,7 @@ void ConstructActor(AActor *actor, const DVector3 &pos, bool SpawningMapThing)
 	// routine, it will not be called.
 	FState *st = actor->SpawnState;
 	actor->state = st;
-	actor->tics = st->GetTics();
+	actor->tics = (actor->ObjectFlags & OF_Clientside) ? st->GetClientsideTics() : st->GetTics();
 	
 	actor->sprite = st->sprite;
 	actor->frame = st->GetFrame();
@@ -4941,8 +4942,15 @@ AActor *AActor::StaticSpawn(FLevelLocals *Level, PClassActor *type, const DVecto
 
 	AActor *actor;
 
-	actor = static_cast<AActor *>(Level->CreateThinker(type));
-	actor->EnableNetworking(true);
+	if (GetDefaultByType(type)->ObjectFlags & OF_Clientside)
+	{
+		actor = static_cast<AActor*>(Level->CreateClientsideThinker(type));
+	}
+	else
+	{
+		actor = static_cast<AActor*>(Level->CreateThinker(type));
+		actor->EnableNetworking(true);
+	}
 
 	ConstructActor(actor, pos, SpawningMapThing);
 	return actor;
@@ -4957,6 +4965,28 @@ DEFINE_ACTION_FUNCTION(AActor, Spawn)
 	PARAM_FLOAT(z);
 	PARAM_INT(flags);
 	ACTION_RETURN_OBJECT(AActor::StaticSpawn(currentVMLevel, type, DVector3(x, y, z), replace_t(flags)));
+}
+
+static AActor* SpawnClientside(PClassActor* type, double x, double y, double z, int flags)
+{
+	if (!(GetDefaultByType(type)->ObjectFlags & OF_Clientside))
+	{
+		ThrowAbortException(X_OTHER, "Tried to spawn a non-clientside Actor from a clientside spawn function.");
+		return nullptr;
+	}
+
+	return AActor::StaticSpawn(currentVMLevel, type, { x, y, z }, (replace_t)flags);
+}
+
+DEFINE_ACTION_FUNCTION_NATIVE(AActor, SpawnClientside, SpawnClientside)
+{
+	PARAM_PROLOGUE;
+	PARAM_CLASS_NOT_NULL(type, AActor);
+	PARAM_FLOAT(x);
+	PARAM_FLOAT(y);
+	PARAM_FLOAT(z);
+	PARAM_INT(flags);
+	ACTION_RETURN_OBJECT(SpawnClientside(type, x, y, z, flags));
 }
 
 PClassActor *ClassForSpawn(FName classname)
