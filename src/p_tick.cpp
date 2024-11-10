@@ -110,7 +110,7 @@ void P_Ticker (void)
 				}
 			}
 
-			it = Level->GetThinkerIterator<AActor>(NAME_None, MAX_STATNUM + 1, true);
+			it = Level->GetClientsideThinkerIterator<AActor>();
 			while ((ac = it.Next()))
 			{
 				if (ac->flags8 & MF8_RECREATELIGHTS)
@@ -171,7 +171,7 @@ void P_Ticker (void)
 			ac->ClearFOVInterpolation();
 		}
 
-		it = Level->GetThinkerIterator<AActor>(NAME_None, MAX_STATNUM + 1, true);
+		it = Level->GetClientsideThinkerIterator<AActor>();
 		while ((ac = it.Next()))
 		{
 			ac->ClearInterpolation();
