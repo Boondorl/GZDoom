@@ -866,7 +866,7 @@ void DThinker::ChangeStatNum (int statnum)
 		statnum = MAX_STATNUM;
 	}
 	Remove();
-	if (ObjectFlags & OF_Clientside)
+	if (IsClientside())
 		Level->ClientsideThinkers.Link(this, statnum);
 	else
 		Level->Thinkers.Link(this, statnum);
@@ -883,7 +883,7 @@ DEFINE_ACTION_FUNCTION_NATIVE(DThinker, ChangeStatNum, ChangeStatNum)
 	PARAM_INT(stat);
 
 	// do not allow ZScript to reposition thinkers in or out of particle ticking.
-	if ((stat != STAT_VISUALTHINKER || (self->ObjectFlags & OF_Clientside)) && !self->IsKindOf(NAME_VisualThinker))
+	if ((stat != STAT_VISUALTHINKER || self->IsClientside()) && !self->IsKindOf(NAME_VisualThinker))
 	{
 		ChangeStatNum(self, stat);
 	}
