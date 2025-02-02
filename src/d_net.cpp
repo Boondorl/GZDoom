@@ -113,12 +113,6 @@ static uint8_t	LocalNetBuffer[MAX_MSGLEN];
 // whatever sequence a client is currently on, only how many packets we've gotten from them.
 static int		LastGameUpdate = 0; // Track the last time the game actually ran the world.
 
-// Network stability handling.
-static int 	SkipTics = 0;
-static int 	FrameSkip[4] = {};
-static int	HostTic = 0;
-static int 	LastHostTic = 0;
-
 static int 	EnterTic = 0;
 static int	LastEnterTic = 0;
 
@@ -297,12 +291,11 @@ void Net_ClearBuffers()
 	NetworkClients.Clear();
 	netgame = multiplayer = false;
 	LastEnterTic = EnterTic;
-	gametic = ClientTic = SkipTics = 0;
-	LastGameUpdate = LastHostTic = HostTic = 0;
+	gametic = ClientTic = 0;
+	LastGameUpdate = 0;
 
 	memset(LocalCmds, 0, sizeof(LocalCmds));
 	memset(ClientStates, 0, sizeof(ClientStates));
-	memset(FrameSkip, 0, sizeof(FrameSkip));
 
 	doomcom.command = doomcom.datalength = 0;
 	doomcom.remoteplayer = -1;
@@ -566,19 +559,8 @@ static void GetPackets()
 	}
 }
 
-// GameTime will advance regardless of network state to check if new client
-// tics should be created.
-static int GameTime = 0;
-
-void NetUpdate()
+void NetUpdate(int tics)
 {
-	GC::CheckGC();
-
-	// check time
-	const int curTime = I_GetTime();
-	int newTics = curTime - GameTime;
-	GameTime = curTime;
-
 	// When playing in packet server mode, the host can strategically tell each client how long they should wait
 	// after starting before generating and sending out inputs. This significantly reduces the net latency clients
 	// have since they'll be forced to wait at minimum host -> highest latency client round trip before they can
@@ -587,39 +569,45 @@ void NetUpdate()
 	if (NetMode == NET_PacketServer && LocalDelay)
 	{
 		if (LocalDelay > 0)
-			LocalDelay -= newTics;
-
-		for (auto client : NetworkClients)
 		{
-			if (client != Net_Arbitrator && ClientStates[client].CurrentSequence < 0)
+			if (LocalDelay >= tics)
 			{
-				newTics = 0;
-				break;
+				LocalDelay -= tics;
+				tics = 0;
 			}
+			else
+			{
+				tics -= LocalDelay;
+				LocalDelay = 0;
+			}
+		}
+		else if (consoleplayer == Net_Arbitrator)
+		{
+			bool allFound = true;
+			for (auto client : NetworkClients)
+			{
+				if (client != Net_Arbitrator && ClientStates[client].CurrentSequence < 0)
+				{
+					allFound = false;
+					tics = 0;
+					break;
+				}
+			}
+
+			if (allFound)
+				LocalDelay = 0;
 		}
 	}
 
-	if (newTics <= 0)
+	if (tics <= 0)
 	{
 		GetPackets();
 		return;
 	}
 
-	if (SkipTics <= newTics)
-	{
-		newTics -= SkipTics;
-		SkipTics = 0;
-	}
-	else
-	{
-		SkipTics -= newTics;
-		newTics = 0;
-	}
-
 	// build new ticcmds for console player
 	const int startTic = ClientTic;
-	int i = 0;
-	for (; i < newTics; ++i)
+	for (int i = 0; i < tics; ++i)
 	{
 		I_StartTic();
 		D_ProcessEvents();
@@ -627,8 +615,7 @@ void NetUpdate()
 			break;			// can't hold any more
 		
 		G_BuildTiccmd(&LocalCmds[ClientTic++ % LOCALCMDTICS]);
-		// Boon TODO: This doesn't check first tic properly.
-		if (doomcom.ticdup == 1)
+		if (doomcom.ticdup == 1 || ClientTic == 1)
 		{
 			Net_NewClientTic();
 		}
@@ -706,9 +693,9 @@ void NetUpdate()
 
 	// If ClientTic didn't cross a doomcom.ticdup boundary, only send packets
 	// to players waiting for resends.
-	const bool resendOnly = (ClientTic / doomcom.ticdup) == (ClientTic - i) / doomcom.ticdup;
 	const int startSequence = startTic / doomcom.ticdup;
 	const int endSequence = ClientTic / doomcom.ticdup;
+	const bool resendOnly = startSequence == endSequence;
 
 	int quitters = 0;
 	int quitNums[MAXPLAYERS];
@@ -716,11 +703,8 @@ void NetUpdate()
 	{
 		for (auto client : NetworkClients)
 		{
-			if (client == Net_Arbitrator)
-				continue;
-
 			// The host has special handling when disconnecting in a packet server game.
-			if (ClientStates[client].Flags & CF_QUIT)
+			if (client != Net_Arbitrator && (ClientStates[client].Flags & CF_QUIT))
 				quitNums[quitters++] = client;
 		}
 	}
@@ -1266,10 +1250,12 @@ void TryRunTics()
 	const int totalTics = EnterTic - LastEnterTic;
 	LastEnterTic = EnterTic;
 
+	GC::CheckGC();
+
 	// Listen for other clients and send out data as needed. This is also
 	// needed for singleplayer! But is instead handled entirely through local
 	// buffers. This has a limit of 17 tics that can be generated.
-	NetUpdate();
+	NetUpdate(totalTics);
 
 	// If the game is paused, everything we need to update has already done so.
 	if (pauseext)
@@ -1337,6 +1323,7 @@ void TryRunTics()
 		M_Ticker();
 		G_Ticker();
 		++gametic;
+		GC::CheckGC();
 
 		TicStabilityEnd();
 	}
@@ -1365,7 +1352,7 @@ void Net_CheckLastReceived()
 				if (client == consoleplayer)
 					continue;
 
-				if (ClientStates[client].CurrentSequence <= gametic)
+				if (ClientStates[client].CurrentSequence < gametic)
 				{
 					ClientStates[client].Flags |= CF_RETRANSMIT;
 					players[client].waiting = true;
