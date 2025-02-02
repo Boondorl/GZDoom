@@ -1244,7 +1244,10 @@ void TryRunTics()
 		EnterTic = I_GetTime();
 
 	const int startCommand = ClientTic;
-	const int totalTics = EnterTic - LastEnterTic;
+	int totalTics = EnterTic - LastEnterTic;
+	if (singletics && totalTics > 1)
+		totalTics = 1;
+
 	LastEnterTic = EnterTic;
 
 	GC::CheckGC();

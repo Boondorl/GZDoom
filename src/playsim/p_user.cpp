@@ -1444,8 +1444,7 @@ void P_PredictPlayer (player_t *player)
 {
 	int maxtic;
 
-	if (singletics ||
-		demoplayback ||
+	if (demoplayback ||
 		player->mo == NULL ||
 		player != player->mo->Level->GetConsolePlayer() ||
 		player->playerstate != PST_LIVE ||
