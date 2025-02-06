@@ -1415,7 +1415,7 @@ bool D_CheckNetGame()
 				v != nullptr ? "forced" : "auto");
 		}
 
-		// Boon TODO: Change this to a bool
+		// TODO: Change this to a bool
 		if (Args->CheckParm("-extratic"))
 			net_extratic = 1;
 	}
